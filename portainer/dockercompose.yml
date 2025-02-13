@@ -1,0 +1,55 @@
+version: '3.2'
+
+services:
+
+  agent:
+    image: portainer/agent
+   
+    environment:
+      AGENT_CLUSTER_ADDR: tasks.agent
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    networks:
+      - agent
+    deploy:
+      mode: global
+      placement:
+        constraints: [node.platform.os == linux]
+
+      labels:
+        - traefik.enable=false #Ignore portainer agent
+
+  portainer:
+    image: portainer/portainer-ce 
+    command: -H tcp://tasks.agent:9001 --tlsskipverify #Allows agent to communicate on a separate network
+    ports:
+      - "9000:9000"   
+      volumes:
+      - portainer-data:/data
+    networks:
+      - agent
+      - proxy #Traefk Network
+
+    deploy:
+      placement:
+        constraints: [node.role == manager] #Must be ran on manager node
+      labels:
+        # Traefik configuration
+        - traefik.enable=true
+        - traefik.swarm.network=proxy
+        - traefik.http.routers.portainer.rule=Host(`portainer.yourdomain.com`)
+        - traefik.http.routers.portainer.entrypoints=websecure  #  the HTTPS entrypoint
+        - traefik.http.routers.portainer.tls=true 
+        - traefik.http.routers.portainer.tls.certresolver=myresolver 
+        - traefik.http.services.portainer.loadbalancer.server.port=9000
+
+
+networks:
+  proxy:
+    external: true  
+  agent:
+    attachable: true
+
+volumes:
+
+  portainer-data:   # Named volume for Portainer data storage
