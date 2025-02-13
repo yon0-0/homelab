@@ -1,0 +1,112 @@
+version: '3.8'
+
+services:
+  prometheus:
+    image: prom/prometheus
+
+    ports:
+      - "9090:9090"
+
+    networks:
+      - private
+      - proxy
+
+    command:
+      - --config.file=/.../prometheus.yml
+      - --storage.tsdb.retention.size=5GB
+      - --storage.tsdb.retention.time=15d
+    volumes:
+      - /etc/hosts:/etc/hosts
+      - data:/prometheus
+      - /.../prometheus.yml:/.../prometheus.yml
+    deploy:
+      placement:
+        constraints:
+          - node.labels.prometheus.data == true
+      labels:
+        - traefik.enable=true
+        - traefik.http.routers.prometheus.rule=Host(`prometheus.yourdomain.com`)
+        - traefik.http.routers.prometheus.entrypoints=websecure
+        - traefik.http.routers.prometheus.middlewares=myauth,ipallowlist
+        - traefik.http.routers.prometheus.tls.certresolver=myresolver
+        - traefik.http.services.prometheus.loadbalancer.server.port=9090
+
+  cadvisor:
+    image: gcr.io/cadvisor/cadvisor:v0.51.0
+
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /var/lib/docker/:/var/lib/docker:ro
+
+    ports:
+      - target: 8080
+        published: 8080
+        mode: host
+
+    networks:
+      - private
+      - proxy
+    command:
+      - --docker_only
+      - --housekeeping_interval=5s
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.cadvisor.rule=Host(`cadvisor.yourdomain.com`)
+      - traefik.http.services.cadvisor.loadbalancer.server.port=8080
+      - traefik.http.routers.cadvisor.entrypoints=metrics,web 
+      - traefik.http.routers.cadvisor.tls.certresolver=myresolvers
+    deploy:
+      mode: global
+      
+  node-exporter:
+    image: quay.io/prometheus/node-exporter:latest
+    environment:
+      - NODE_ID={{.Node.ID}}
+
+    ports:
+      - target: 9100
+        published: 9100
+        mode: host
+        
+    networks:
+      - private
+      - proxy
+    volumes:
+      - /:/host:ro,rslave
+      - /etc/hostname:/etc/nodename
+      - /sys:/host/sys:ro 
+      - /dev:/host/dev:ro 
+      
+    command:
+      - --collector.textfile.directory=/home
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.node-exporter.rule=Host(`node-exporter.yourdomain.com`)
+      - traefik.http.services.node-exporter.loadbalancer.server.port=9100
+      - traefik.http.routers.node-exporter.entrypoints=metrics,web
+      - traefik.http.routers.node-exporter.tls.certresolver=myresolver
+      
+    configs:
+      - source: node_exporter_entrypoint
+        target: /docker-entrypoint.sh
+
+    entrypoint:
+      - /bin/sh
+      - /docker-entrypoint.sh
+
+    deploy:
+      mode: global
+
+configs:
+  node_exporter_entrypoint:
+    external: true
+
+networks:
+  private:
+  proxy:
+    external: true
+
+volumes:
+  data:
